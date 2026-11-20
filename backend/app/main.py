@@ -1,5 +1,6 @@
 """FastAPI application - REST API for chat, workflows, runs, schedules, plugins and integrations."""
 import logging
+import os
 import re
 import uuid
 from contextlib import asynccontextmanager
@@ -7,6 +8,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -346,3 +348,11 @@ def data_alerts():
 @app.get("/api/data/zones")
 def data_zones():
     return available_zones()
+
+
+# ----------------------------------------------------------------------------- web UI (single-service deployment)
+# When the React build is present (STATIC_DIR, set in the Dockerfile), serve it from the same server,
+# so one URL hosts both the UI and the API. Mounted last so every /api route takes precedence.
+_static = os.getenv("STATIC_DIR", "")
+if _static and os.path.isdir(_static):
+    app.mount("/", StaticFiles(directory=_static, html=True), name="ui")

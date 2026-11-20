@@ -94,6 +94,21 @@ Then explore:
 
 ---
 
+## Deploy (free, one URL)
+
+The repo includes a `Dockerfile` that builds the React UI and serves it from the FastAPI server, so one service hosts the whole app. There's also a `render.yaml` blueprint for [Render](https://render.com):
+
+1. On Render, choose **New → Blueprint**, connect this GitHub repo, and pick the free plan.
+2. Optionally set `GEMINI_API_KEY`. Leave it empty to run in rule-based mode.
+3. Deploy. The app is then live at `https://<service-name>.onrender.com`.
+
+Free-tier notes:
+- The service sleeps after about 15 minutes idle; the first request wakes it in about a minute.
+- Schedules don't fire while it sleeps.
+- The SQLite data resets on each restart or redeploy. WF001–WF004 are recreated automatically.
+
+---
+
 ## Tests
 
 ```bash
