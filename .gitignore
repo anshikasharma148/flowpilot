@@ -5,8 +5,8 @@ __pycache__/
 .pytest_cache/
 frontend/node_modules/
 frontend/dist/
-# assignment brief (not part of the code)
-*.docx
 # local / editor files
 .vscode/
 *.log
+# assignment brief (not part of the code)
+/Agentic Workflow Automation.docx

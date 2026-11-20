@@ -9,7 +9,7 @@ validate and run a workflow) or through **scheduled triggers** (daily / weekly /
 - **Data:** alerts and performance stats come from the provided JSON files; everything else (workflows, runs,
   step logs, schedules, tickets, emails, plugins, chat history) is stored in SQL.
 
-The design is described in [docs/DESIGN.md](docs/DESIGN.md).
+The design is described in [docs/DESIGN.md](docs/DESIGN.md). A project overview (features, how to run and test, limitations, deployment) is in [docs/FlowPilot-Project-Overview.pdf](docs/FlowPilot-Project-Overview.pdf), also available [as Word](docs/FlowPilot-Project-Overview.docx).
 
 ---
 
