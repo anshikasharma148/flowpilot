@@ -1,11 +1,15 @@
 """Report builder plugin - turns step outputs into Markdown reports."""
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from ..config import TIMEZONE
 
 from .base import Plugin, PluginContext, action, register
 
 
 def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M")
+    # use the configured timezone (servers usually run on UTC)
+    return datetime.now(ZoneInfo(TIMEZONE)).strftime("%Y-%m-%d %H:%M")
 
 
 def _ticket_section(tickets: dict | None) -> list[str]:
