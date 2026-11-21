@@ -84,7 +84,7 @@ def sched_out(s: Schedule) -> dict:
 
 # ----------------------------------------------------------------------------- health / dashboard
 def integrations_status() -> dict:
-    return {"email": mailer.status(),
+    return {"email": {**mailer.status(), "ops_team_email": config.OPS_TEAM_EMAIL or None},
             "jira": {"configured": ticketing.jira_enabled(), "url": config.JIRA_URL or None,
                      "project": config.JIRA_PROJECT_KEY, "issue_type": config.JIRA_ISSUE_TYPE}}
 

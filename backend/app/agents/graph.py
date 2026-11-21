@@ -149,6 +149,8 @@ def make_graph(db: Session):
                             "monitor_topic": res.monitor_topic, "schedule_op": res.schedule_op,
                             "target_id": res.target_id, "intents": rules.detect_intents(msg)}
                 source = llm.provider()
+        if decision is not None:
+            decision["params"] = _only_known_emails(decision.get("params") or {}, msg, pending)
         if decision is None:
             decision = (rules.merge_followup(msg, pending) if pending else None) or rules.select(msg)
 
@@ -194,7 +196,8 @@ def make_graph(db: Session):
                                      max_tokens=8000)
                 if res is None:
                     break
-                cand = _apply_extracted_defaults(_dynamic_to_spec(res, msg), params)
+                cand = _apply_extracted_defaults(_strip_invented_email_defaults(_dynamic_to_spec(res, msg), msg),
+                                                 params)
                 errors = validate_definition(cand["definition"])
                 if not errors:
                     spec, source = cand, llm.provider()
@@ -347,12 +350,52 @@ def make_graph(db: Session):
 
 
 # ----------------------------------------------------------------------------- helpers
+def _allowed_emails(msg: str, pending: dict | None = None) -> set[str]:
+    """Email addresses the assistant may use: ones the user typed (now or in the pending request) and the
+    configured operations-team address when the user refers to that team. Never anything the LLM made up."""
+    allowed = {e.lower().rstrip(".") for e in rules.EMAIL_RE.findall(msg or "")}
+    for e in ((pending or {}).get("params") or {}).get("email_to") or []:
+        allowed.add(str(e).lower())
+    if rules.config.OPS_TEAM_EMAIL and rules.re.search(r"\b(ops|operations|noc)\s+team\b", (msg or "").lower()):
+        allowed.add(rules.config.OPS_TEAM_EMAIL.lower())
+    return allowed
+
+
+def _only_known_emails(params: dict, msg: str, pending: dict | None = None) -> dict:
+    value = params.get("email_to")
+    if not value:
+        return params
+    items = value if isinstance(value, list) else rules.re.split(r"[,;\s]+", str(value))
+    allowed = _allowed_emails(msg, pending)
+    kept = [e.strip() for e in items if e and e.strip().lower() in allowed]
+    params = dict(params)
+    if kept:
+        params["email_to"] = kept
+    else:
+        params.pop("email_to", None)  # -> the validation agent asks the user for a real address
+    return params
+
+
+def _strip_invented_email_defaults(spec: dict, msg: str) -> dict:
+    allowed = _allowed_emails(msg)
+    for name, p in (spec.get("params_schema") or {}).items():
+        d = p.get("default")
+        if "email" in name and d:
+            items = d if isinstance(d, list) else [d]
+            kept = [e for e in items if str(e).strip().lower() in allowed]
+            if kept:
+                p["default"] = kept
+            else:
+                p.pop("default", None)
+    return spec
+
+
 def _apply_extracted_defaults(spec: dict, params: dict) -> dict:
     """Make sure values the user stated (e.g. an email address) become defaults of the generated workflow,
     and that every $params.x referenced by a step is declared in the schema."""
     import re as _re
     schema = spec["params_schema"]
-    referenced = set(_re.findall(r"\$params\.([A-Za-z_][A-Za-z0-9_]*)|params\.([A-Za-z_][A-Za-z0-9_]*)",
+    referenced = set(_re.findall(r"\$params\.([A-Za-z_][A-Za-z0-9_]*)|\bparams\.([A-Za-z_][A-Za-z0-9_]*)",
                                  json.dumps(spec["definition"])))
     for name in {a or b for a, b in referenced}:
         val = (params or {}).get(name)

@@ -352,3 +352,22 @@ def test_jira_side_duplicate_check_survives_local_reset(monkeypatch):
         out = ticketing.TicketingPlugin().create_for_alerts(PluginContext(db=db), alerts=alerts)
     assert out["skipped"] == [{"device": "dev-a", "reason": "open Jira issue OPS-77"}]
     assert out["created_count"] == 1 and ticketing.alert_label("u-remote-2") in created_for[0]
+
+
+def test_llm_invented_email_addresses_are_dropped(monkeypatch):
+    from app.agents import graph
+    monkeypatch.setattr(config, "OPS_TEAM_EMAIL", "")
+    # the model "filled in" a placeholder the user never typed -> removed, so the user will be asked
+    out = graph._only_known_emails({"email_to": ["ops-team@example.com"]},
+                                   "email the report to the operations team", None)
+    assert "email_to" not in out
+    # an address the user typed is kept; an extra invented one is removed
+    out = graph._only_known_emails({"email_to": ["a@b.com", "x@made-up.com"]}, "send it to a@b.com", None)
+    assert out["email_to"] == ["a@b.com"]
+    # the configured ops address is allowed when the user refers to the operations team
+    monkeypatch.setattr(config, "OPS_TEAM_EMAIL", "noc@real.com")
+    out = graph._only_known_emails({"email_to": "noc@real.com"}, "email the ops team", None)
+    assert out["email_to"] == ["noc@real.com"]
+    # a generated workflow may not carry an invented default recipient
+    spec = {"params_schema": {"email_to": {"type": "email_list", "default": ["ops-team@example.com"]}}}
+    assert "default" not in graph._strip_invented_email_defaults(spec, "email the report")["params_schema"]["email_to"]
