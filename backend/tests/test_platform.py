@@ -3,7 +3,8 @@ import os
 import tempfile
 
 _tmp = tempfile.mkdtemp()
-os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
+# TEST_DATABASE_URL lets the suite run against a real (empty) PostgreSQL database
+os.environ["DATABASE_URL"] = os.getenv("TEST_DATABASE_URL") or f"sqlite:///{_tmp}/test.db"
 os.environ["LLM_MODE"] = "rules"
 # Never send real email or create real Jira issues from the test suite, whatever backend/.env contains.
 os.environ["EMAIL_PROVIDER"] = "dry_run"
