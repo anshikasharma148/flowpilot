@@ -133,7 +133,9 @@ class TicketingPlugin(Plugin):
                 if a.get("ticket_id"):
                     skipped.append({"device": a.get("device"), "reason": f"existing ticket {a['ticket_id']}"})
                     continue
+                # only tickets in the system currently in use count (a local ticket is not a Jira issue)
                 existing = ctx.db.scalar(select(Ticket).where(Ticket.alert_uid == a.get("uid"),
+                                                              Ticket.system == ("jira" if live else "local"),
                                                               Ticket.status != "Closed"))
                 if existing:
                     skipped.append({"device": a.get("device"), "reason": f"existing ticket {existing.key}"})
