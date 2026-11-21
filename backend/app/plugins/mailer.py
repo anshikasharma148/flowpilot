@@ -59,8 +59,22 @@ _TABLE_STYLE = {
 }
 
 
+_LIST_ITEM = re.compile(r"^\s*([*+-]|\d+[.)])\s+")
+
+
+def _normalize_lists(md: str) -> str:
+    """Python-Markdown only starts a list after a blank line; LLM text often omits it."""
+    out: list[str] = []
+    for line in md.splitlines():
+        if _LIST_ITEM.match(line) and out and out[-1].strip() and not _LIST_ITEM.match(out[-1]) \
+                and not out[-1].lstrip().startswith("|"):
+            out.append("")
+        out.append(line)
+    return "\n".join(out)
+
+
 def render_html(body_md: str) -> str:
-    html = markdown.markdown(body_md, extensions=["tables"])
+    html = markdown.markdown(_normalize_lists(body_md), extensions=["tables"])
     for tag, styled in _TABLE_STYLE.items():
         html = html.replace(tag, styled)
     return ('<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1c2330">'
