@@ -109,6 +109,7 @@ class Ticket(Base):
     alert_uid: Mapped[str | None] = mapped_column(String(300), index=True, nullable=True)
     device: Mapped[str | None] = mapped_column(String(200), nullable=True)
     run_id: Mapped[int | None] = mapped_column(ForeignKey("workflow_runs.id"), nullable=True)
+    url: Mapped[str | None] = mapped_column(String(500), nullable=True)  # link to the Jira issue
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -118,8 +119,10 @@ class EmailLog(Base):
     to: Mapped[str] = mapped_column(String(500))
     subject: Mapped[str] = mapped_column(String(300))
     body: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(20))  # sent | simulated | failed
+    status: Mapped[str] = mapped_column(String(20))  # sent | failed | dry_run
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(20), nullable=True)      # smtp | brevo
+    message_id: Mapped[str | None] = mapped_column(String(300), nullable=True)  # provider message id
     run_id: Mapped[int | None] = mapped_column(ForeignKey("workflow_runs.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -143,3 +146,17 @@ class ChatMessage(Base):
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    _add_missing_columns()
+
+
+def _add_missing_columns() -> None:
+    """Tiny migration step: add nullable columns that were introduced after a database was created."""
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            existing = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name not in existing and col.nullable:
+                    conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN "{col.name}" '
+                                      f'{col.type.compile(engine.dialect)}'))

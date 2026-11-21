@@ -5,6 +5,10 @@ import tempfile
 _tmp = tempfile.mkdtemp()
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
 os.environ["LLM_MODE"] = "rules"
+# Never send real email or create real Jira issues from the test suite, whatever backend/.env contains.
+os.environ["EMAIL_PROVIDER"] = "dry_run"
+os.environ["JIRA_URL"] = ""
+os.environ["OPS_TEAM_EMAIL"] = "ops-team@example.com"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -63,7 +67,7 @@ def test_prompt1_dynamic_scheduled(client):
     assert steps["tickets"]["status"] == "success"
     # 4 DOWN alerts; 2 already have tickets in the feed -> 2 created
     assert steps["tickets"]["output"]["created_count"] == 2
-    assert steps["notify"]["output"]["status"] == "simulated"
+    assert steps["notify"]["output"]["status"] == "dry_run"
     # running again must not duplicate tickets
     run2 = client.post(f"/api/schedules/{sched['id']}/run").json()
     assert {s["step_id"]: s for s in run2["steps"]}["tickets"]["output"]["created_count"] == 0
@@ -190,3 +194,140 @@ def test_validation_rejects_bad_generated_designs():
     assert any("duplicate email.send" in e for e in errs)
     # nested list reference is flattened at runtime
     assert resolve(["$params.m"], {"params": {"m": ["LINK", "LOAD"]}}) == ["LINK", "LOAD"]
+
+
+# ----------------------------------------------------------------------------- real integrations (mocked transport)
+import httpx  # noqa: E402
+
+from app import config  # noqa: E402
+from app.plugins import mailer, ticketing  # noqa: E402
+
+
+def _jira_transport(calls, reject_fields=()):
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+        body = _json.loads(request.content or b"{}")
+        calls.append({"path": request.url.path, "fields": body.get("fields", {}),
+                      "auth": request.headers.get("authorization", "")})
+        bad = {f: f"Field '{f}' cannot be set." for f in reject_fields if f in body.get("fields", {})}
+        if bad:
+            return httpx.Response(400, json={"errorMessages": [], "errors": bad})
+        return httpx.Response(201, json={"id": "10001", "key": f"OPS-{len(calls)}"})
+    return httpx.MockTransport(handler)
+
+
+def test_jira_issue_created_with_fallback_for_rejected_fields(monkeypatch):
+    calls = []
+    monkeypatch.setattr(config, "JIRA_URL", "https://example.atlassian.net")
+    monkeypatch.setattr(config, "JIRA_EMAIL", "me@example.com")
+    monkeypatch.setattr(config, "JIRA_API_TOKEN", "token")
+    monkeypatch.setattr(ticketing, "_client", lambda: httpx.Client(
+        base_url=config.JIRA_URL, auth=("me@example.com", "token"),
+        transport=_jira_transport(calls, reject_fields=("priority",))))
+    res = ticketing.create_issue("[DOWN] LINK on dev-1", "details", "High", ["flowpilot"])
+    assert res["key"].startswith("OPS-") and res["url"].endswith("/browse/" + res["key"])
+    assert res["dropped_fields"] == ["priority"]
+    assert calls[0]["path"] == "/rest/api/2/issue" and calls[0]["auth"].startswith("Basic ")
+    assert "priority" in calls[0]["fields"] and "priority" not in calls[1]["fields"]
+    assert calls[1]["fields"]["description"].startswith("Priority: High")
+
+
+def test_ticket_plugin_uses_jira_and_continues_after_a_failure(monkeypatch):
+    monkeypatch.setattr(config, "JIRA_URL", "https://example.atlassian.net")
+    monkeypatch.setattr(config, "JIRA_EMAIL", "me@example.com")
+    monkeypatch.setattr(config, "JIRA_API_TOKEN", "token")
+    n = {"i": 0}
+
+    def fake_create(summary, description, priority, labels):
+        n["i"] += 1
+        if n["i"] == 1:
+            raise ticketing.JiraError("Jira 500: boom")
+        return {"key": f"OPS-{n['i']}", "url": f"https://example.atlassian.net/browse/OPS-{n['i']}",
+                "dropped_fields": []}
+    monkeypatch.setattr(ticketing, "create_issue", fake_create)
+    from app.db import SessionLocal
+    from app.plugins.base import PluginContext
+    alerts = [{"uid": f"u-jira-{i}", "device": f"dev-{i}", "intensity": "DOWN", "metric": "LINK"} for i in range(3)]
+    with SessionLocal() as db:
+        out = ticketing.TicketingPlugin().create_for_alerts(PluginContext(db=db), alerts=alerts)
+    assert out["created_count"] == 2 and len(out["failed"]) == 1
+    assert all(t["system"] == "jira" and t["url"].startswith("https://") for t in out["created"])
+
+
+def test_email_brevo_api_payload(monkeypatch):
+    sent = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        sent.update(url=url, headers=headers, json=json)
+        return httpx.Response(201, json={"messageId": "<abc@smtp-relay.brevo.com>"},
+                              request=httpx.Request("POST", url))
+    monkeypatch.setattr(config, "EMAIL_PROVIDER", "brevo")
+    monkeypatch.setattr(config, "BREVO_API_KEY", "xkeysib-test")
+    monkeypatch.setattr(config, "EMAIL_FROM", "sender@example.com")
+    monkeypatch.setattr(mailer.httpx, "post", fake_post)
+    prov, msg_id = mailer.deliver(["a@b.com"], "Subject", "| a | b |\n|---|---|\n| 1 | 2 |")
+    assert prov == "brevo" and msg_id.startswith("<abc")
+    assert sent["url"] == mailer.BREVO_URL and sent["headers"]["api-key"] == "xkeysib-test"
+    assert sent["json"]["to"] == [{"email": "a@b.com"}] and "<table" in sent["json"]["htmlContent"]
+
+
+def test_email_smtp_send(monkeypatch):
+    log = {}
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout=None):
+            log["conn"] = (host, port)
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def starttls(self):
+            log["tls"] = True
+        def login(self, user, pw):
+            log["login"] = user
+        def sendmail(self, frm, to, msg):
+            log.update(frm=frm, to=to, msg=msg)
+    monkeypatch.setattr(config, "EMAIL_PROVIDER", "smtp")
+    monkeypatch.setattr(config, "SMTP_HOST", "smtp.gmail.com")
+    monkeypatch.setattr(config, "SMTP_PORT", 587)
+    monkeypatch.setattr(config, "SMTP_USER", "me@gmail.com")
+    monkeypatch.setattr(config, "EMAIL_FROM", "me@gmail.com")
+    monkeypatch.setattr(mailer.smtplib, "SMTP", FakeSMTP)
+    prov, _ = mailer.deliver(["x@y.com"], "Hello", "body")
+    assert prov == "smtp" and log["conn"] == ("smtp.gmail.com", 587) and log["tls"] and log["login"] == "me@gmail.com"
+    assert log["to"] == ["x@y.com"] and "Subject: Hello" in log["msg"]
+
+
+def test_email_fails_loudly_when_not_configured(client, monkeypatch):
+    monkeypatch.setattr(config, "EMAIL_PROVIDER", "auto")
+    monkeypatch.setattr(config, "BREVO_API_KEY", "")
+    monkeypatch.setattr(config, "SMTP_HOST", "")
+    r = client.post("/api/workflows/WF003/run", json={"params": {"email_to": "a@b.com", "min_count": 1}}).json()
+    notify = next(s for s in r["steps"] if s["step_id"] == "notify")
+    assert notify["status"] == "failed" and "No email provider is configured" in notify["error"]
+    assert r["status"] == "failed"
+
+
+# ----------------------------------------------------------------------------- reports & mandatory parameters
+def test_performance_report_lists_every_down_link(client):
+    r = client.post("/api/workflows/WF004/run", json={"params": {"zone": "Shivamogga"}}).json()
+    report = r["output"]["report"]
+    down_section = report.split("## Links down")[1].split("## Degraded")[0]
+    import re as _re
+    assert "(30)" in down_section.splitlines()[0]
+    assert len([ln for ln in down_section.splitlines() if _re.match(r"^\| \d+ \|", ln)]) == 30
+
+
+def test_zone_is_mandatory_for_performance_report(client):
+    res = chat(client, "Generate the performance report for last 6 hours", sid="z1")
+    assert res["status"] == "needs_input" and "zone" in res["reply"]
+    assert chat(client, "Mangaluru", sid="z1")["status"] == "executed"
+
+
+def test_email_recipient_required_when_email_is_requested(client):
+    res = chat(client, "Generate the performance report for Mangaluru and email it", sid="e1")
+    assert res["status"] == "needs_input" and "email_to" in res["reply"]
+    done = chat(client, "noc@example.com", sid="e1")
+    assert done["status"] == "executed"
+    run = client.get(f"/api/runs/{done['run_id']}").json()
+    assert run["params"]["email_to"] == ["noc@example.com"]

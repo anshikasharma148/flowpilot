@@ -21,17 +21,25 @@ ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-5-5")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-3.5-flash")
 
 # Operations defaults ----------------------------------------------------------
-OPS_TEAM_EMAIL = os.getenv("OPS_TEAM_EMAIL", "ops-team@example.com")
+OPS_TEAM_EMAIL = os.getenv("OPS_TEAM_EMAIL", "").strip()  # empty -> the assistant asks for an address
 TIMEZONE = os.getenv("TIMEZONE", "Asia/Kolkata")
 
-# Optional real integrations (left blank -> simulated, persisted in SQL) -------
+# Email -------------------------------------------------------------------------
+# EMAIL_PROVIDER: "auto" (Brevo if BREVO_API_KEY is set, else SMTP if SMTP_HOST is set), "brevo", "smtp",
+# or "dry_run" (record only, nothing is sent - used by the automated tests).
+EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "auto").lower()
+EMAIL_FROM_NAME = os.getenv("EMAIL_FROM_NAME", "FlowPilot")
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-SMTP_FROM = os.getenv("SMTP_FROM", "workflow-bot@example.com")
+SMTP_FROM = os.getenv("SMTP_FROM", "") or os.getenv("EMAIL_FROM", "") or SMTP_USER
+EMAIL_FROM = os.getenv("EMAIL_FROM", "") or SMTP_FROM
 
-JIRA_URL = os.getenv("JIRA_URL", "")
+# Jira Cloud (https://<site>.atlassian.net) ---------------------------------------
+JIRA_URL = os.getenv("JIRA_URL", "").rstrip("/")
 JIRA_EMAIL = os.getenv("JIRA_EMAIL", "")
 JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "")
 JIRA_PROJECT_KEY = os.getenv("JIRA_PROJECT_KEY", "OPS")
+JIRA_ISSUE_TYPE = os.getenv("JIRA_ISSUE_TYPE", "Task")

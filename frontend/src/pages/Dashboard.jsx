@@ -58,7 +58,7 @@ export default function Dashboard({ navigate }) {
         <Stat icon="runs" tone="violet" label="Total runs" value={stats?.runs} sub={stats && Object.entries(stats.runs_by_trigger).map(([k, v]) => `${k} ${v}`).join(' · ')} />
         <Stat icon="clock" tone="sky" label="Active schedules" value={stats?.schedules_active} sub="auto-triggered" />
         <Stat icon="ticket" tone="amber" label="Tickets created" value={stats?.tickets} sub="deduplicated" />
-        <Stat icon="mail" tone="emerald" label="Emails sent" value={stats?.emails} sub="incl. simulated" />
+        <Stat icon="mail" tone="emerald" label="Emails" value={stats?.emails} sub="delivered via Brevo / SMTP" />
         <Stat icon="alert" tone="rose" label="Active alerts" value={stats?.alerts} sub={stats?.zones?.length ? stats.zones.join(' · ') : ''} />
       </div>
       <div className="two-col">

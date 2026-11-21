@@ -9,7 +9,7 @@ validate and run a workflow) or through **scheduled triggers** (daily / weekly /
 - **Data:** alerts and performance stats come from the provided JSON files; everything else (workflows, runs,
   step logs, schedules, tickets, emails, plugins, chat history) is stored in SQL.
 
-The design is described in [docs/DESIGN.md](docs/DESIGN.md). A project overview (features, how to run and test, limitations, deployment) is in [docs/FlowPilot-Project-Overview.pdf](docs/FlowPilot-Project-Overview.pdf), also available [as Word](docs/FlowPilot-Project-Overview.docx).
+The design is described in [docs/DESIGN.md](docs/DESIGN.md).
 
 ---
 
@@ -56,8 +56,27 @@ Copy `backend/.env.example` to `backend/.env` and set **one** of:
 Claude calls opt in to Anthropic's server-side refusal fallback (`fallbacks: "default"`). Any LLM error falls back
 to the rules, and the error appears in the health endpoint.
 
-SMTP and Jira credentials are optional too. Without them, emails go to a simulated outbox and tickets go to a
-local ticket table. Both are visible on the *Tickets & Emails* page.
+### Email delivery and Jira tickets (real integrations)
+
+Workflows send **real email** and create **real Jira Cloud issues**. Configure them in `backend/.env` (template:
+`backend/.env.example`):
+
+| Integration | Settings | Notes |
+|---|---|---|
+| Email via Gmail SMTP | `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_USER`, `SMTP_PASSWORD` (a Google **App Password**), `SMTP_FROM` | Simplest for local runs |
+| Email via Brevo API | `BREVO_API_KEY`, `EMAIL_FROM` (a sender verified in Brevo) | HTTPS, so it works on hosts that block outgoing SMTP |
+| Jira Cloud | `JIRA_URL` (`https://<site>.atlassian.net`), `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY`, `JIRA_ISSUE_TYPE` (default `Task`) | Creates issues through the REST API; each ticket links to its issue |
+| Operations team | `OPS_TEAM_EMAIL` | Used when a request says "email the operations team" |
+
+Check them before a demo:
+- `POST /api/integrations/email/test` with `{"to": "you@example.com"}` sends a real test email.
+- `POST /api/integrations/jira/test` verifies the credentials, project and issue type, and creates nothing.
+
+Behaviour:
+- **Email:** if no provider is configured, an email step **fails with a clear error**; it is never silently skipped or faked.
+- **Jira:** if Jira is not configured, tickets are written to a local table, marked `local`.
+- **Jira field fallback:** if the project rejects the `priority` or `labels` field, the issue is created without that field, and the priority is kept in the description.
+- **Per-alert failures:** a failure on one alert is reported and does not stop the other tickets.
 
 ---
 
@@ -88,7 +107,7 @@ Then explore:
 - **Workflows:** WF001–WF004 (predefined), AI-generated (dynamic) and custom workflows. You can run them with a
   parameter form, schedule them, or duplicate/edit them as JSON with live validation.
 - **Schedules:** pause, resume, run now, delete.
-- **Plugins:** every integration, its actions and live/simulated mode. You can disable a plugin; the Plugin
+- **Plugins:** every integration, its actions and whether it is live or not configured. You can disable a plugin; the Plugin
   Selection Agent then blocks workflows that need it.
 - **Dashboard:** run outcomes, upcoming schedules, recent runs, current alert feed.
 

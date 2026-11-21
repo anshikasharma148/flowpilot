@@ -187,8 +187,8 @@ details > summary { cursor: pointer; color: var(--muted); }
 }
 .badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .8; }
 .badge-success, .badge-active, .badge-sent, .badge-live, .badge-predefined, .badge-low { background: var(--ok-soft); color: var(--ok); }
-.badge-failed, .badge-down, .badge-highest { background: var(--bad-soft); color: var(--bad); }
-.badge-partial, .badge-paused, .badge-simulated, .badge-high, .badge-skipped, .badge-stopped, .badge-medium { background: var(--warn-soft); color: var(--warn); }
+.badge-failed, .badge-down, .badge-highest, .badge-not.configured { background: var(--bad-soft); color: var(--bad); }
+.badge-partial, .badge-paused, .badge-dry-run, .badge-dry_run, .badge-rules, .badge-high, .badge-skipped, .badge-stopped, .badge-medium { background: var(--warn-soft); color: var(--warn); }
 .badge-running, .badge-dynamic, .badge-chat, .badge-jira, .badge-custom { background: var(--accent-soft); color: var(--accent); }
 .badge-schedule, .badge-manual, .badge-ui, .badge-local { background: var(--info-soft); color: var(--info); }
 .tag { font-size: 11px; background: var(--panel-3); border-radius: 6px; padding: 1px 7px; margin-left: 6px; color: var(--muted); font-weight: 550; }

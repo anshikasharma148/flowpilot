@@ -13,14 +13,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import llm, scheduler
+from . import config, llm, scheduler
 from .agents.graph import handle_message
 from .data_sources import available_zones, load_alerts
 from .db import (ChatMessage, EmailLog, PluginConfig, Schedule, SessionLocal, StepRun, Ticket, Workflow,
                  WorkflowRun, init_db)
 from .engine.executor import ParamValidationError, execute_workflow
 from .engine.validate import validate_definition
-from .plugins import all_plugins
+from .plugins import all_plugins, mailer, ticketing
 from .plugins.alerts import normalize
 from .seed import seed
 
@@ -83,10 +83,49 @@ def sched_out(s: Schedule) -> dict:
 
 
 # ----------------------------------------------------------------------------- health / dashboard
+def integrations_status() -> dict:
+    return {"email": mailer.status(),
+            "jira": {"configured": ticketing.jira_enabled(), "url": config.JIRA_URL or None,
+                     "project": config.JIRA_PROJECT_KEY, "issue_type": config.JIRA_ISSUE_TYPE}}
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok", "llm": llm.status(), "timezone": scheduler.TZ.key,
-            "scheduler_running": scheduler.scheduler.running}
+            "scheduler_running": scheduler.scheduler.running, "integrations": integrations_status()}
+
+
+@app.get("/api/integrations")
+def integrations():
+    return integrations_status()
+
+
+class TestEmailIn(BaseModel):
+    to: str = Field(min_length=3, max_length=300)
+
+
+@app.post("/api/integrations/email/test")
+def test_email(body: TestEmailIn):
+    """Send a real test email through the configured provider."""
+    recipients = mailer._recipients(body.to)
+    bad = [r for r in recipients if not mailer.EMAIL_RE.match(r)]
+    if not recipients or bad:
+        raise HTTPException(422, f"invalid email address(es): {', '.join(bad) or body.to}")
+    try:
+        prov, msg_id = mailer.deliver(recipients, "FlowPilot test email",
+                                      "# FlowPilot test email\n\nIf you can read this, email delivery works.")
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "provider": mailer.provider(), "error": f"{type(e).__name__}: {e}"}
+    return {"ok": True, "provider": prov, "message_id": msg_id, "to": recipients}
+
+
+@app.post("/api/integrations/jira/test")
+def test_jira():
+    """Check Jira credentials, project access and issue type (creates nothing)."""
+    try:
+        return ticketing.check_connection()
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
 @app.get("/api/stats")
@@ -329,13 +368,14 @@ def toggle_plugin(name: str, body: SchedulePatch, db: Session = Depends(get_db))
 @app.get("/api/tickets")
 def list_tickets(db: Session = Depends(get_db)):
     return [{"id": t.id, "key": t.key, "system": t.system, "title": t.title, "description": t.description,
-             "priority": t.priority, "status": t.status, "device": t.device, "run_id": t.run_id,
+             "priority": t.priority, "status": t.status, "device": t.device, "run_id": t.run_id, "url": t.url,
              "created_at": t.created_at} for t in db.query(Ticket).order_by(Ticket.id.desc()).all()]
 
 
 @app.get("/api/emails")
 def list_emails(db: Session = Depends(get_db)):
     return [{"id": e.id, "to": e.to, "subject": e.subject, "body": e.body, "status": e.status, "error": e.error,
+             "provider": e.provider, "message_id": e.message_id,
              "run_id": e.run_id, "created_at": e.created_at}
             for e in db.query(EmailLog).order_by(EmailLog.id.desc()).all()]
 

@@ -25,7 +25,8 @@ class PerformancePlugin(Plugin):
         inputs={"zone": "zone / region name, e.g. 'Mangaluru' (default: all zones)",
                 "hours": "look-back window in hours (default 6)",
                 "isp": "filter by ISP (optional)"},
-        outputs={"rows": "list", "summary": "dict", "worst_links": "list", "window": "dict"},
+        outputs={"rows": "list", "summary": "dict", "down_links": "list (every down link)",
+                 "degraded_links": "list (every degraded link)", "window": "dict"},
     )
     def fetch(self, ctx: PluginContext, zone=None, hours=6, isp=None) -> dict:
         data = load_performance()
@@ -60,21 +61,22 @@ class PerformancePlugin(Plugin):
         } for r in rows]
 
         n = len(rows_out)
-        down = [r for r in rows_out if r["uptime"] == 0]
+        # every link falls in exactly one class: down (no uptime), degraded (up, score < 80), healthy
+        down = sorted([r for r in rows_out if r["uptime"] == 0], key=lambda r: (r["site_code"] or "", r["ip"] or ""))
+        degraded = sorted([r for r in rows_out if r["uptime"] > 0 and r["score"] < 80], key=lambda r: r["score"])
         summary = {
             "zone": zone_norm or "All zones",
             "links": n,
             "links_down": len(down),
-            "links_healthy": sum(1 for r in rows_out if r["score"] >= 80),
-            "links_degraded": sum(1 for r in rows_out if 0 < r["score"] < 80),
+            "links_healthy": n - len(down) - len(degraded),
+            "links_degraded": len(degraded),
             "avg_uptime": round(mean([r["uptime"] for r in rows_out]), 2) if n else 0,
             "avg_score": round(mean([r["score"] for r in rows_out]), 2) if n else 0,
             "avg_latency_ms": round(mean([r["latency_ms"] for r in rows_out if r["uptime"] > 0] or [0]), 2),
             "avg_packet_drop": round(mean([r["packet_drop"] for r in rows_out if r["uptime"] > 0] or [0]), 2),
             "avg_jitter_ms": round(mean([r["jitter_ms"] for r in rows_out if r["uptime"] > 0] or [0]), 2),
         }
-        worst = sorted(rows_out, key=lambda r: (r["score"], -r["packet_drop"]))[:10]
-        return {"rows": rows_out, "summary": summary, "worst_links": worst,
+        return {"rows": rows_out, "summary": summary, "down_links": down, "degraded_links": degraded,
                 "window": {"data": win, "requested": requested}}
 
     @action("zones", "List zones that have performance data.", outputs={"zones": "list"})

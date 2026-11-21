@@ -13,7 +13,7 @@ export default function Outputs({ navigate }) {
       <header className="page-head">
         <div>
           <h1>Tickets &amp; Emails</h1>
-          <p className="muted">Side effects produced by workflows. Without Jira/SMTP credentials they are stored locally (simulated).</p>
+          <p className="muted">Real Jira issues and delivered emails produced by workflows. Ticket keys link to the issue in Jira.</p>
         </div>
       </header>
       <div className="tabs">
@@ -30,7 +30,9 @@ export default function Outputs({ navigate }) {
               <tbody>
                 {tickets.map((t) => (
                   <tr key={t.id} onClick={() => setOpen(open === `t${t.id}` ? null : `t${t.id}`)} className="clickable">
-                    <td><strong>{t.key}</strong></td>
+                    <td>{t.url
+                      ? <a href={t.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><strong>{t.key}</strong> ↗</a>
+                      : <strong>{t.key}</strong>}</td>
                     <td>{t.title}{open === `t${t.id}` && <pre className="json">{t.description}</pre>}</td>
                     <td><Badge value={t.priority} /></td>
                     <td>{t.status}</td>
@@ -51,7 +53,7 @@ export default function Outputs({ navigate }) {
             <details key={m.id} className="email">
               <summary>
                 <Badge value={m.status} /> <strong>{m.subject}</strong>
-                <span className="muted"> → {m.to} · {fmtDate(m.created_at)}</span>
+                <span className="muted"> → {m.to} · {fmtDate(m.created_at)}{m.provider ? ` · via ${m.provider}` : ''}</span>
                 {m.run_id && <button className="link" onClick={(e) => { e.preventDefault(); navigate('runs', m.run_id) }}>run #{m.run_id}</button>}
               </summary>
               {m.error && <div className="error-note">{m.error}</div>}

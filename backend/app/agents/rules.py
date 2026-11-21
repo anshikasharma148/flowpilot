@@ -62,7 +62,7 @@ def parse_params(text: str) -> dict:
     p: dict = {}
 
     emails = EMAIL_RE.findall(text)
-    if re.search(r"\b(ops|operations|noc)\s+team\b", t):
+    if re.search(r"\b(ops|operations|noc)\s+team\b", t) and config.OPS_TEAM_EMAIL:
         emails.append(config.OPS_TEAM_EMAIL)
     if emails:
         p["email_to"] = list(dict.fromkeys(e.rstrip(".") for e in emails))
@@ -275,7 +275,8 @@ def compose_dynamic(text: str, intents: dict, params: dict) -> dict:
         "priority": {"type": "string", "default": params.get("priority", "High"),
                      "enum": ["Highest", "High", "Medium", "Low"], "description": "Ticket priority"},
         "email_to": {"type": "email_list", "description": "Report recipients",
-                     **({"default": params["email_to"]} if params.get("email_to") else {})},
+                     **({"default": params["email_to"]} if params.get("email_to") else
+                        {"required": True} if intents.get("email") else {})},
     }
     if params.get("metrics"):
         schema["metrics"] = {"type": "list", "default": params["metrics"], "description": "Metric types"}

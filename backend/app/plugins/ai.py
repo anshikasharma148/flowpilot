@@ -51,7 +51,7 @@ class AIPlugin(Plugin):
     category = "intelligence"
 
     def mode(self) -> str:
-        return "live" if llm.enabled() else "simulated"
+        return "live" if llm.enabled() else "rules"
 
     @action("summarize_alerts", "Summarise a set of alerts for the operations team.",
             inputs={"data": "output of alerts.fetch"}, outputs={"summary": "markdown", "generated_by": "str"}, required=("data",))
@@ -68,12 +68,17 @@ class AIPlugin(Plugin):
             inputs={"data": "output of performance.fetch"}, outputs={"summary": "markdown", "generated_by": "str"}, required=("data",))
     def summarize_performance(self, ctx: PluginContext, data: dict | None = None) -> dict:
         data = data or {}
-        slim = {"summary": data.get("summary"), "worst_links": data.get("worst_links"),
-                "window": data.get("window")}
+        keep = ("site_code", "ip", "address", "circuit_id", "speed_mbps", "score", "uptime", "packet_drop",
+                "latency_ms")
+        slim = {"summary": data.get("summary"), "window": data.get("window"),
+                "down_links": [{k: r.get(k) for k in keep} for r in data.get("down_links", [])],
+                "degraded_links": [{k: r.get(k) for k in keep} for r in data.get("degraded_links", [])]}
         text = llm.text(
             "You are a network performance analyst. Summarise the performance of this zone in "
-            "Markdown for an operations audience: overall health, the worst links with numbers, "
-            "and recommendations. Use only the given data. Under 200 words.",
+            "Markdown for an operations audience: overall health with the exact counts, what the down and "
+            "degraded links have in common (sites, areas, link speeds), and recommendations. Do NOT list the "
+            "links one by one - the report already contains complete tables of every down and degraded link. "
+            "Use only the given data. Under 200 words.",
             json.dumps(slim, default=str))
         if text:
             return {"summary": text, "generated_by": llm.provider()}

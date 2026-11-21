@@ -49,7 +49,7 @@ LangGraph is used at **two levels**:
 | **Workflow Selection Agent** | Classify the request (`run_existing`, `generate_dynamic`, `list_workflows`, `answer`, `clarify`), choose a workflow, extract parameters and schedule | Claude structured output (`SelectionDecision`) with the workflow catalog in the prompt | Regex intents / parameter / schedule parser (`rules.py`) |
 | **Workflow Generation Agent** | Build a new workflow when no single workflow fits, or when the user asks to *define* one (saved, not run). Values stated in the request (for example an email address) become the workflow's defaults | Claude structured output (`DynamicWorkflow`) from the plugin catalog; validated statically and retried once with the errors fed back | Capability composer (`rules.compose_dynamic`) |
 | **Parameter Validation Agent** | Coerce and validate against the workflow's `params_schema`: types, enums, ranges, emails, zone existence. Asks for missing or invalid values and remembers the pending request, so the next message can complete it | — | — |
-| **Plugin Selection Agent** | Find the integrations the workflow needs and check they are enabled; report live vs simulated mode | — | — |
+| **Plugin Selection Agent** | Find the integrations the workflow needs and check they are enabled; report whether each is live or not configured | — | — |
 | **Execution Agent** | Run the workflow now, or create and register a schedule | — | — |
 | **Monitoring Agent** | Answers status questions from the database (last run, a specific run, recent/failed runs, schedules, tickets, emails, alerts, overview) and manages schedules (pause / resume / delete / run now). The LLM only classifies the question, so every number comes straight from the database | Classification by the Selection Agent (`monitor` / `manage_schedule`) | Regex command detection (`rules.detect_command`) |
 | **Reporting Agent** | Build the execution report: step table, durations, actions taken (tickets, emails), business report, plus a short AI assessment when Claude is available | Claude text | Deterministic report |
@@ -125,7 +125,7 @@ prompt; the rules use `merge_followup`. For example, `Mumbai → (invalid) → "
 @register
 class TicketingPlugin(Plugin):
     name = "ticketing"
-    def mode(self): return "live" if jira_configured else "simulated"
+    def mode(self): return "live" if jira_configured else "local"
 
     @action("create_for_alerts", "Create one ticket per alert", inputs={...}, outputs={...})
     def create_for_alerts(self, ctx: PluginContext, alerts=None, priority="High", skip_existing=True): ...
@@ -138,8 +138,8 @@ class TicketingPlugin(Plugin):
 - Built-in plugins:
   - `alerts` and `performance`: JSON data sources
   - `ai`: Claude summaries with a deterministic fallback
-  - `ticketing`: Jira REST API, or the local SQL ticket store
-  - `email`: SMTP, or a simulated outbox
+  - `ticketing`: real Jira Cloud issues through the REST API, retrying without fields the project rejects; local table only when Jira is not configured
+  - `email`: real delivery through the Brevo HTTPS API or SMTP (for example Gmail); fails loudly when not configured
   - `report`: Markdown reports
 - **Adding an integration** (for example Slack or ServiceNow) means one new module with no engine changes. It
   immediately appears in the catalog, so the Generation Agent can use it.
@@ -166,8 +166,8 @@ step_runs(id, run_id FK, step_id, plugin, action, status[success|failed|skipped]
 schedules(id, workflow_id FK, name, frequency, cron, run_at, interval_minutes, params JSON, enabled,
           created_from[chat|ui|api], last_run_at, created_at)
 tickets(id, key UNIQUE, system[local|jira], title, description, priority, status, alert_uid, device,
-          run_id FK, created_at)
-email_logs(id, to, subject, body, status[sent|simulated|failed], error, run_id FK, created_at)
+          run_id FK, url, created_at)
+email_logs(id, to, subject, body, status[sent|failed|dry_run], error, provider, message_id, run_id FK, created_at)
 plugins(name PK, enabled, config JSON)
 chat_messages(id, session_id, role, content, meta JSON(trace, run_id, schedule_id, pending), created_at)
 ```

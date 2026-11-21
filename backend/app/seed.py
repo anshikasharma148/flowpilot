@@ -98,7 +98,7 @@ PREDEFINED: list[dict] = [
         "name": "Performance Report",
         "description": "Collect link performance data for a zone, summarise it and optionally email the report.",
         "params_schema": {
-            "zone": {"type": "string", "default": "all", "validator": "zone",
+            "zone": {"type": "string", "required": True, "validator": "zone",
                      "description": "Zone / region (e.g. Mangaluru, Shivamogga) or 'all'"},
             "hours": {"type": "number", "default": 6, "min": 1, "max": 720, "description": "Look-back window (hours)"},
             "email_to": {"type": "email_list", "description": "Recipients (optional)"},

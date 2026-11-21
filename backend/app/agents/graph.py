@@ -102,7 +102,8 @@ Rules:
   tickets AND email) that no single catalog workflow covers.
 - Extract parameters using the catalog's parameter names. Lists are comma separated (e.g. "DOWN,HIGH").
   Severities: DOWN, HIGH, MEDIUM, LOW, STOPPED ("critical" means DOWN). Durations for alert age go in
-  min_active_minutes (minutes). "operations team"/"ops team" email = {ops_email}.
+  min_active_minutes (minutes). "operations team"/"ops team" email = {ops_email} (if empty, leave
+  email_to out so the user is asked for it). Never invent an email address.
 - Keep the zone exactly as the user wrote it (validation happens later).
 - schedule: only when the user asks for recurring or deferred execution ("every day at 9 AM" -> daily 09:00).
 - If a pending request is waiting for parameters and the new message supplies them, return run_existing for
@@ -229,6 +230,10 @@ def make_graph(db: Session):
     def validation_agent(state: ChatState) -> dict:
         wf = db.query(Workflow).filter_by(code=state["workflow_code"]).first()
         res = validate_params(wf.params_schema, state.get("params"))
+        # The user asked for something to be emailed but gave no recipient: ask instead of silently skipping.
+        if ((state.get("intents") or {}).get("email") and "email_to" in (wf.params_schema or {})
+                and not res.values.get("email_to") and "email_to" not in res.missing):
+            res.missing.append("email_to")
         if res.ok:
             return {"params": res.values,
                     "trace": _t("Parameter Validation Agent", "parameters valid", params=res.values)}

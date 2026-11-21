@@ -12,3 +12,19 @@ services:
         value: gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-3.5-flash
       - key: TIMEZONE
         value: Asia/Kolkata
+      # Email: Brevo HTTPS API (hosts often block outgoing SMTP)
+      - key: BREVO_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: OPS_TEAM_EMAIL
+        sync: false
+      # Jira Cloud
+      - key: JIRA_URL
+        sync: false
+      - key: JIRA_EMAIL
+        sync: false
+      - key: JIRA_API_TOKEN
+        sync: false
+      - key: JIRA_PROJECT_KEY
+        sync: false

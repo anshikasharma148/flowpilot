@@ -44,7 +44,7 @@ class Plugin:
                 self.actions[spec["name"]] = ActionSpec(fn=meth, **spec)
 
     def mode(self) -> str:
-        """'live' when talking to a real external system, 'simulated' otherwise."""
+        """'live' when connected to the real external system; otherwise a short reason (e.g. 'not configured')."""
         return "live"
 
     def describe(self) -> dict:

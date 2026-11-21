@@ -18,14 +18,47 @@ def _ticket_section(tickets: dict | None) -> list[str]:
     lines = ["", "## Tickets"]
     created = tickets.get("created") or []
     if created:
-        lines += ["| Ticket | Priority | Device | Title |", "|---|---|---|---|"]
-        lines += [f"| {t['key']} | {t['priority']} | {t['device']} | {t['title']} |" for t in created]
+        lines += ["| Ticket | System | Priority | Device | Title |", "|---|---|---|---|---|"]
+        for t in created:
+            key = f"[{t['key']}]({t['url']})" if t.get("url") else t["key"]
+            lines.append(f"| {key} | {t.get('system', '')} | {t['priority']} | {t['device']} | {t['title']} |")
     else:
         lines.append("No new tickets were created.")
+    failed = tickets.get("failed") or []
+    if failed:
+        lines += ["", f"**{len(failed)} ticket(s) could not be created:**"]
+        lines += [f"- {f['device']}: {f['error']}" for f in failed]
     skipped = tickets.get("skipped") or []
     if skipped:
         lines.append("")
         lines.append("Skipped (already ticketed): " + ", ".join(f"{s['device']} ({s['reason']})" for s in skipped))
+    return lines
+
+
+def _alert_table(alerts: list[dict]) -> list[str]:
+    """Every alert in scope - never a sample."""
+    if not alerts:
+        return []
+    lines = ["", f"## Alerts in scope ({len(alerts)})",
+             "| Device | Hostname | Client | Metric | Severity | Active (min) | IP | Ticket |",
+             "|---|---|---|---|---|---|---|---|"]
+    for a in sorted(alerts, key=lambda a: (a.get("intensity") != "DOWN", -int(a.get("active_minutes") or 0))):
+        lines.append(f"| {a.get('device')} | {a.get('hostname') or '-'} | {a.get('client')} | {a.get('metric')} | "
+                     f"{a.get('intensity')} | {a.get('active_minutes')} | {a.get('ip_address')} | "
+                     f"{a.get('ticket_id') or '-'} |")
+    return lines
+
+
+def _link_table(title: str, links: list[dict], empty: str) -> list[str]:
+    lines = ["", f"## {title} ({len(links)})"]
+    if not links:
+        return lines + [empty]
+    lines += ["| # | Site | IP | Address | Circuit | Speed (Mbps) | Uptime % | Score | Latency ms | Drop % |",
+              "|---|---|---|---|---|---|---|---|---|---|"]
+    for i, r in enumerate(links, 1):
+        addr = (r.get("address") or "-").replace("|", "/")
+        lines.append(f"| {i} | {r['site_code']} | {r['ip']} | {addr} | {r['circuit_id']} | {r.get('speed_mbps')} | "
+                     f"{r['uptime']:.1f} | {r['score']:.0f} | {r['latency_ms']:.0f} | {r['packet_drop']:.0f} |")
     return lines
 
 
@@ -49,6 +82,7 @@ class ReportPlugin(Plugin):
         if by_int:
             lines += ["", "## Breakdown", "| Severity | Count |", "|---|---|"]
             lines += [f"| {k} | {v} |" for k, v in sorted(by_int.items())]
+        lines += _alert_table(data.get("alerts") or [])
         lines += _ticket_section(tickets)
         return {"markdown": "\n".join(lines), "title": title}
 
@@ -87,10 +121,9 @@ class ReportPlugin(Plugin):
             f"| Avg uptime | {s.get('avg_uptime')} % |", f"| Avg performance score | {s.get('avg_score')} |",
             f"| Avg latency | {s.get('avg_latency_ms')} ms |", f"| Avg packet drop | {s.get('avg_packet_drop')} % |",
             f"| Avg jitter | {s.get('avg_jitter_ms')} ms |",
-            "", "## Worst performing links",
-            "| Site | IP | Score | Uptime % | Latency ms | Drop % | Circuit |", "|---|---|---|---|---|---|---|",
         ]
-        for r in data.get("worst_links", []):
-            lines.append(f"| {r['site_code']} | {r['ip']} | {r['score']:.0f} | {r['uptime']:.1f} | "
-                         f"{r['latency_ms']:.0f} | {r['packet_drop']:.0f} | {r['circuit_id']} |")
+        lines += _link_table("Links down", data.get("down_links", []), "No link is down.")
+        lines += _link_table("Degraded links (score below 80)", data.get("degraded_links", []),
+                             "No link is degraded.")
+        lines += ["", f"The remaining {s.get('links_healthy')} link(s) are healthy (score 80 or above)."]
         return {"markdown": "\n".join(lines), "title": title}
