@@ -9,6 +9,8 @@ Robustness:
   ticket created earlier by FlowPilot, are skipped.
 Without Jira credentials, tickets are written to the local SQL ticket table (system = "local").
 """
+import hashlib
+
 import httpx
 from sqlalchemy import select
 
@@ -91,6 +93,26 @@ def check_connection() -> dict:
                                             f"set JIRA_ISSUE_TYPE to one of {types}"})}
 
 
+def alert_label(uid: str | None) -> str:
+    """Stable, Jira-safe label identifying the alert an issue was created for."""
+    return "fp-alert-" + hashlib.sha1((uid or "").encode()).hexdigest()[:12]
+
+
+def find_open_issue(label: str) -> str | None:
+    """Return the key of an unresolved Jira issue carrying `label`, if any (Jira is the source of truth,
+    so duplicates are avoided even after the local database is reset)."""
+    jql = f'project = "{config.JIRA_PROJECT_KEY}" AND labels = "{label}" AND statusCategory != Done'
+    body = {"jql": jql, "fields": ["key"], "maxResults": 1}
+    with _client() as c:
+        resp = c.post("/rest/api/3/search/jql", json=body)
+        if resp.status_code == 404:  # older Jira deployments
+            resp = c.post("/rest/api/2/search", json=body)
+        if resp.status_code >= 400:
+            raise JiraError(f"Jira search {resp.status_code}: {_error_text(resp)}")
+        issues = resp.json().get("issues") or []
+        return issues[0]["key"] if issues else None
+
+
 def _description(a: dict) -> str:
     return (
         "Created automatically by FlowPilot for an operational alert.\n\n"
@@ -140,6 +162,14 @@ class TicketingPlugin(Plugin):
                 if existing:
                     skipped.append({"device": a.get("device"), "reason": f"existing ticket {existing.key}"})
                     continue
+                if live:
+                    try:
+                        remote = find_open_issue(alert_label(a.get("uid")))
+                    except Exception:  # noqa: BLE001 - a search problem must not block ticketing
+                        remote = None
+                    if remote:
+                        skipped.append({"device": a.get("device"), "reason": f"open Jira issue {remote}"})
+                        continue
             title = (f"{title_prefix} " if title_prefix else "") + \
                 f"[{a.get('intensity')}] {a.get('metric')} on {a.get('device')}"
             description = _description(a)
@@ -147,7 +177,8 @@ class TicketingPlugin(Plugin):
             try:
                 if live:
                     res = create_issue(title, description, priority,
-                                       labels=["flowpilot", f"severity-{str(a.get('intensity', '')).lower()}"])
+                                       labels=["flowpilot", f"severity-{str(a.get('intensity', '')).lower()}",
+                                               alert_label(a.get("uid"))])
                     key, url, system = res["key"], res["url"], "jira"
                     if res["dropped_fields"]:
                         note = f"project does not accept {', '.join(res['dropped_fields'])}; kept in description"

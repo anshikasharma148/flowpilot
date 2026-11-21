@@ -331,3 +331,23 @@ def test_email_recipient_required_when_email_is_requested(client):
     assert done["status"] == "executed"
     run = client.get(f"/api/runs/{done['run_id']}").json()
     assert run["params"]["email_to"] == ["noc@example.com"]
+
+
+def test_jira_side_duplicate_check_survives_local_reset(monkeypatch):
+    """An open Jira issue labelled for the alert is found in Jira itself, so nothing is re-created."""
+    monkeypatch.setattr(config, "JIRA_URL", "https://example.atlassian.net")
+    monkeypatch.setattr(config, "JIRA_EMAIL", "me@example.com")
+    monkeypatch.setattr(config, "JIRA_API_TOKEN", "token")
+    target = ticketing.alert_label("u-remote-1")
+    monkeypatch.setattr(ticketing, "find_open_issue", lambda label: "OPS-77" if label == target else None)
+    created_for = []
+    monkeypatch.setattr(ticketing, "create_issue", lambda s, d, p, labels: created_for.append(labels) or
+                        {"key": "OPS-78", "url": "https://example.atlassian.net/browse/OPS-78", "dropped_fields": []})
+    from app.db import SessionLocal
+    from app.plugins.base import PluginContext
+    alerts = [{"uid": "u-remote-1", "device": "dev-a", "intensity": "DOWN", "metric": "LINK"},
+              {"uid": "u-remote-2", "device": "dev-b", "intensity": "DOWN", "metric": "LINK"}]
+    with SessionLocal() as db:
+        out = ticketing.TicketingPlugin().create_for_alerts(PluginContext(db=db), alerts=alerts)
+    assert out["skipped"] == [{"device": "dev-a", "reason": "open Jira issue OPS-77"}]
+    assert out["created_count"] == 1 and ticketing.alert_label("u-remote-2") in created_for[0]
