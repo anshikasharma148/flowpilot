@@ -7,15 +7,17 @@ chat history - lives in the SQL database.
 from datetime import datetime, timezone
 
 from sqlalchemy import (JSON, Boolean, DateTime, ForeignKey, Integer, String, Text,
-                        create_engine)
+                        create_engine, event)
 from sqlalchemy.orm import (DeclarativeBase, Mapped, mapped_column, relationship,
                             sessionmaker)
 
 from .config import DATABASE_URL
 
+_sqlite = DATABASE_URL.startswith("sqlite")
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
+    connect_args={"check_same_thread": False} if _sqlite else {},
+    **({} if _sqlite else {"pool_pre_ping": True, "pool_recycle": 300, "pool_size": 5, "max_overflow": 5}),
 )
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
@@ -142,6 +144,18 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text)
     meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # agent trace, run id, schedule id
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+@event.listens_for(Base, "before_insert", propagate=True)
+@event.listens_for(Base, "before_update", propagate=True)
+def _fit_string_lengths(mapper, connection, target) -> None:
+    """PostgreSQL enforces VARCHAR lengths (SQLite does not): trim over-long text instead of failing a run."""
+    for col in mapper.columns:
+        length = getattr(col.type, "length", None)
+        if length and isinstance(col.type, String):
+            val = getattr(target, col.key, None)
+            if isinstance(val, str) and len(val) > length:
+                setattr(target, col.key, val[: length - 1] + "…")
 
 
 def init_db() -> None:

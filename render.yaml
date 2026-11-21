@@ -6,6 +6,9 @@ services:
     plan: free
     healthCheckPath: /api/health
     envVars:
+      # Persistent PostgreSQL (e.g. Neon free tier) so schedules and history survive restarts
+      - key: DATABASE_URL
+        sync: false
       - key: GEMINI_API_KEY      # optional: leave empty to run in rule-based mode
         sync: false
       - key: GEMINI_MODEL

@@ -10,7 +10,11 @@ load_dotenv(BASE_DIR / ".env")
 DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
 ALERTS_FILE = Path(os.getenv("ALERTS_FILE", DATA_DIR / "alerts.json"))
 PERFORMANCE_FILE = Path(os.getenv("PERFORMANCE_FILE", DATA_DIR / "performance_stats.json"))
-DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'workflow.db'}")
+DATABASE_URL = os.getenv("DATABASE_URL", "") or f"sqlite:///{BASE_DIR / 'workflow.db'}"
+# Hosting providers hand out postgres:// or postgresql:// URLs; use the psycopg (v3) driver for them.
+for _prefix in ("postgres://", "postgresql://"):
+    if DATABASE_URL.startswith(_prefix):
+        DATABASE_URL = "postgresql+psycopg://" + DATABASE_URL[len(_prefix):]
 
 # LLM -------------------------------------------------------------------------
 # LLM_MODE: "auto" (use Claude when credentials exist, else rules), "claude", "rules"

@@ -144,7 +144,7 @@ def stats(db: Session = Depends(get_db)):
 # ----------------------------------------------------------------------------- chat
 class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
-    session_id: str | None = None
+    session_id: str | None = Field(None, max_length=64)
 
 
 @app.post("/api/chat")
