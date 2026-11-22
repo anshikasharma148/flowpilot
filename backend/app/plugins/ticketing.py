@@ -155,20 +155,23 @@ class TicketingPlugin(Plugin):
                 if a.get("ticket_id"):
                     skipped.append({"device": a.get("device"), "reason": f"existing ticket {a['ticket_id']}"})
                     continue
-                # only tickets in the system currently in use count (a local ticket is not a Jira issue)
-                existing = ctx.db.scalar(select(Ticket).where(Ticket.alert_uid == a.get("uid"),
-                                                              Ticket.system == ("jira" if live else "local"),
-                                                              Ticket.status != "Closed"))
-                if existing:
-                    skipped.append({"device": a.get("device"), "reason": f"existing ticket {existing.key}"})
-                    continue
+                # With Jira connected, Jira is the source of truth: an issue that was deleted or closed there
+                # no longer blocks a new ticket. FlowPilot's own records are only used when Jira can't be asked.
+                use_local_records = not live
                 if live:
                     try:
                         remote = find_open_issue(alert_label(a.get("uid")))
-                    except Exception:  # noqa: BLE001 - a search problem must not block ticketing
-                        remote = None
+                    except Exception:  # noqa: BLE001 - search unavailable -> fall back to our records
+                        remote, use_local_records = None, True
                     if remote:
                         skipped.append({"device": a.get("device"), "reason": f"open Jira issue {remote}"})
+                        continue
+                if use_local_records:
+                    existing = ctx.db.scalar(select(Ticket).where(Ticket.alert_uid == a.get("uid"),
+                                                                  Ticket.system == ("jira" if live else "local"),
+                                                                  Ticket.status != "Closed"))
+                    if existing:
+                        skipped.append({"device": a.get("device"), "reason": f"existing ticket {existing.key}"})
                         continue
             title = (f"{title_prefix} " if title_prefix else "") + \
                 f"[{a.get('intensity')}] {a.get('metric')} on {a.get('device')}"

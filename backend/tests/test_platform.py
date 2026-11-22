@@ -371,3 +371,29 @@ def test_llm_invented_email_addresses_are_dropped(monkeypatch):
     # a generated workflow may not carry an invented default recipient
     spec = {"params_schema": {"email_to": {"type": "email_list", "default": ["ops-team@example.com"]}}}
     assert "default" not in graph._strip_invented_email_defaults(spec, "email the report")["params_schema"]["email_to"]
+
+
+def test_issue_deleted_in_jira_no_longer_blocks_a_new_ticket(monkeypatch):
+    """A stale local record must not block a ticket when Jira says no open issue exists."""
+    monkeypatch.setattr(config, "JIRA_URL", "https://example.atlassian.net")
+    monkeypatch.setattr(config, "JIRA_EMAIL", "me@example.com")
+    monkeypatch.setattr(config, "JIRA_API_TOKEN", "token")
+    from app.db import SessionLocal, Ticket
+    from app.plugins.base import PluginContext
+    with SessionLocal() as db:
+        db.add(Ticket(key="OPS-STALE", system="jira", title="t", description="d", priority="High",
+                      alert_uid="u-stale-1", device="dev-s", status="Open"))
+        db.commit()
+        monkeypatch.setattr(ticketing, "find_open_issue", lambda label: None)  # deleted in Jira
+        monkeypatch.setattr(ticketing, "create_issue", lambda s, d, p, labels: {
+            "key": "OPS-NEW", "url": "https://example.atlassian.net/browse/OPS-NEW", "dropped_fields": []})
+        out = ticketing.TicketingPlugin().create_for_alerts(
+            PluginContext(db=db), alerts=[{"uid": "u-stale-1", "device": "dev-s", "intensity": "DOWN", "metric": "LINK"}])
+        assert out["created_count"] == 1
+        # if Jira can't be searched, our own records are used instead
+        def boom(label):
+            raise ticketing.JiraError("search down")
+        monkeypatch.setattr(ticketing, "find_open_issue", boom)
+        out = ticketing.TicketingPlugin().create_for_alerts(
+            PluginContext(db=db), alerts=[{"uid": "u-stale-1", "device": "dev-s", "intensity": "DOWN", "metric": "LINK"}])
+        assert out["created_count"] == 0 and "existing ticket" in out["skipped"][0]["reason"]
